@@ -1,0 +1,27 @@
+{
+  "name": "FaceGenerator",
+  "version": "1.0.0",
+  "description": "SoSa face generator",
+  "main": "app.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SoSa-Community/FaceGenerator.git"
+  },
+  "keywords": [
+    "bot",
+    "face",
+    "generator"
+  ],
+  "author": "James Mahy",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "canvas": "^2.6.1",
+    "express": "^4.17.1",
+    "jimp": "^0.14.0",
+    "merge-images": "^2.0.0",
+    "replace-color": "^2.3.0"
+  }
+}
