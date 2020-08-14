@@ -7,6 +7,7 @@ const { Canvas, Image } = require('canvas');
 const Buffer = require('buffer').Buffer;
 const replaceColor = require('replace-color');
 const Jimp = require('jimp');
+const svg2img = require('svg2img');
 
 const config = require('./config');
 
@@ -33,7 +34,6 @@ if(!fs.existsSync(`${config.cacheFolder}`)){
         console.error('Could not create or find Cache Folder', `${config.cacheFolder}`);
         process.exit();
     }
-
 }
 
 
@@ -46,9 +46,20 @@ for(let type in images){
         process.exit();
     }
 
-    fs.readdirSync(`${config.imageFolder}${type}`).forEach(file => array.push(`${config.imageFolder}${type}/${file}`));
+    fs.readdirSync(`${config.imageFolder}${type}`).forEach(file => {
+        const fileSplit = file.split('.');
+        const fileType = fileSplit.pop().toLowerCase();
+        const path = `${config.imageFolder}${type}/${file}`;
 
-    array.sort((a, b) => parseInt(a.replace(/[^0-9]+/,'')) - parseInt(b.replace(/[^0-9]+/,'')));
+        array.push({
+                name: fileSplit.join('.'),
+                path,
+                type: fileType,
+                buffer: fs.readFileSync(path)
+        });
+    });
+
+    array.sort((a, b) => parseInt(a.name.replace(/[^0-9]+/,'')) - parseInt(b.name.replace(/[^0-9]+/,'')));
     array.unshift(null);
     images[type] = array;
 }
@@ -190,10 +201,12 @@ function generateBotFace(callback, head, eyes, mouth, ears, backgroundColor, fac
              * @param faceImage
              */
             const doMerge = (headImage, faceImage) => {
-                array.unshift(headImage);
-                array.unshift(faceImage);
+                let filesToMerge = array.map(image => image.buffer);
 
-                mergeImages(array, {Canvas: Canvas, Image: Image}).then((b64) => {
+                if(headImage !== null) filesToMerge.unshift(headImage);
+                if(faceImage !== null) filesToMerge.unshift(faceImage);
+
+                mergeImages(filesToMerge, {Canvas: Canvas, Image: Image}).then((b64) => {
                     let base64Image = b64.split(';base64,').pop();
                     const img = Buffer.from(base64Image, 'base64');
 
@@ -203,48 +216,70 @@ function generateBotFace(callback, head, eyes, mouth, ears, backgroundColor, fac
                 });
             };
 
+            let headImage = images.heads[head];
             /**
-             * If the cache file doesn't exist, generate a new canvas for the requested face colour
-             * we maintain a transparent background on our "face" template for flexibility reasons
-             */
-            new Jimp(config.assetWidth, config.assetHeight, faceColor, (err, faceCanvas) => {
-                faceCanvas.getBuffer(Jimp.MIME_PNG, (err, faceColorImage) => {
-                    /**
-                     * To allow the background to be changed (as well as the face background)
-                     * we set the head background to #ff00ff so that we can use it as a "green screen"
-                     * Color replacement can be a little slow so to speed things up - we cache the heads once they've been
-                     * processed for future use.
-                     */
-                    const headFile = `./cache/heads/head-${head}-${backgroundColor}.png`;
+             * Check to see if our Head Image is a SVG file,
+             * if it is, we can do a simple string replace instead of changing pixel by pixel
+             * **/
+            if(headImage.type === 'svg'){
+                let svgString = headImage.buffer.toString('utf8');
+                svgString = svgString.replace('rgb(255,0,255)',`#${backgroundColor}`);
+                svgString = svgString.replace('rgb(255,1,255)',`${faceColor}`);
 
-                    fs.exists(headFile, (exists) => {
-                        /** If we find a head cache file,  go ahead and merge it with the other parts **/
-                        if(exists){
-                            doMerge(headFile, faceColorImage);
-                        }else{
-                            /**
-                             * If we can't find a head cache file, we need to replace the greenscreen with our
-                             * chosen colour and then write it to the cache for future use.
-                             *
-                             * Then we merge!
-                             */
-                            replaceColor({
-                                image: images.heads[head],
-                                colors: {
-                                    type: 'hex',
-                                    targetColor: config.headGreenScreenColor,
-                                    replaceColor: `#${backgroundColor}`
-                                },
-                                deltaE: 30
-                            }).then(jimpObject => {
-                                jimpObject.write(headFile, (err, backgroundColor) => {
-                                    doMerge(headFile, faceColorImage);
+                svg2img(svgString, {'width':config.assetWidth, 'height': config.assetHeight, preserveAspectRatio:true}, function(error, buffer) {
+                    doMerge(buffer, null);
+                });
+            }else{
+                /**
+                 * If we won't have a SVG file, we have to fallback to the slower find and replace method
+                 * to speed this process up, we use a file cache.
+                 *
+                 * If the cache file doesn't exist, generate a new canvas for the requested face colour
+                 * we maintain a transparent background on our "face" template for flexibility reasons
+                 */
+                new Jimp(config.assetWidth, config.assetHeight, faceColor, (err, faceCanvas) => {
+                    faceCanvas.getBuffer(Jimp.MIME_PNG, (err, faceColorImage) => {
+                        /**
+                         * To allow the background to be changed (as well as the face background)
+                         * we set the head background to #ff00ff so that we can use it as a "green screen"
+                         * Color replacement can be a little slow so to speed things up - we cache the heads once they've been
+                         * processed for future use.
+                         */
+                        const headFile = `./cache/heads/head-${head}-${backgroundColor}.png`;
+
+                        fs.exists(headFile, (exists) => {
+                            /** If we find a head cache file,  go ahead and merge it with the other parts **/
+                            if(exists){
+                                doMerge(headFile, faceColorImage);
+                            }else{
+                                /**
+                                 * If we can't find a head cache file, we need to replace the greenscreen with our
+                                 * chosen colour and then write it to the cache for future use.
+                                 *
+                                 * Then we merge!
+                                 */
+
+                                replaceColor({
+                                    image: headImage.buffer,
+                                    colors: {
+                                        type: 'hex',
+                                        targetColor: config.headGreenScreenColor,
+                                        replaceColor: `#${backgroundColor}`
+                                    },
+                                    deltaE: 30
+                                }).then(jimpObject => {
+                                    jimpObject.write(headFile, (err, backgroundColor) => {
+                                        doMerge(headFile, faceColorImage);
+                                    });
                                 });
-                            });
-                        }
+
+                            }
+                        });
                     });
                 });
-            });
+            }
+
+
         }
     });
 }

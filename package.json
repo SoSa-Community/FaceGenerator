@@ -22,6 +22,7 @@
     "express": "^4.17.1",
     "jimp": "^0.14.0",
     "merge-images": "^2.0.0",
-    "replace-color": "^2.3.0"
+    "replace-color": "^2.3.0",
+    "svg2img": "^0.8.1"
   }
 }
